@@ -1,6 +1,7 @@
 package dev.splitthebill.android
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -8,8 +9,10 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -18,11 +21,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.splitthebill.android.data.ExampleBillRepository
 import dev.splitthebill.android.home.HomeScreen
 import dev.splitthebill.android.home.HomeViewModel
+import dev.splitthebill.android.review.ReceiptPhase
+import dev.splitthebill.android.review.ReceiptScanViewModel
+import dev.splitthebill.android.review.ReviewScreen
+import dev.splitthebill.android.scan.ScanRoute
 import dev.splitthebill.android.stub.StubScreen
 import dev.splitthebill.shared.BillId
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.material3.DrawerValue
 
 private const val Home = "home"
 private const val Scan = "scan"
@@ -30,6 +35,8 @@ private const val Profile = "profile"
 private const val Friends = "friends"
 private const val Settings = "settings"
 private const val Summary = "summary"
+private const val Review = "review"
+private const val AddPeople = "add-people"
 
 @Composable
 fun SplitTheBillApp() {
@@ -38,10 +45,17 @@ fun SplitTheBillApp() {
     var route by rememberSaveable { mutableStateOf(Home) }
     var summaryBillId by rememberSaveable { mutableStateOf<String?>(null) }
     val repository = ExampleBillRepository()
+    val scanViewModel: ReceiptScanViewModel = viewModel()
 
     fun go(next: String) {
         route = next
         scope.launch { drawerState.close() }
+    }
+
+    LaunchedEffect(scanViewModel.phase) {
+        if (scanViewModel.phase is ReceiptPhase.Ready && route == Scan) {
+            go(Review)
+        }
     }
 
     ModalNavigationDrawer(
@@ -58,7 +72,7 @@ fun SplitTheBillApp() {
                 )
                 NavigationDrawerItem(
                     label = { Text("Bills") },
-                    selected = route == Home || route == Scan || route == Summary,
+                    selected = route == Home || route == Scan || route == Review || route == AddPeople || route == Summary,
                     onClick = { go(Home) },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
@@ -78,10 +92,39 @@ fun SplitTheBillApp() {
         },
     ) {
         when (route) {
-            Scan -> StubScreen(
-                title = "Scan",
-                body = "Snap a receipt to start. Next you'll review the items, add people, assign what they had, and see the totals.",
+            Scan -> ScanRoute(
+                reading = scanViewModel.phase is ReceiptPhase.Reading,
+                errorMessage = (scanViewModel.phase as? ReceiptPhase.Failed)?.message,
                 onBack = { go(Home) },
+                onPhoto = scanViewModel::read,
+            )
+            Review -> {
+                val state = scanViewModel.review
+                if (state == null) {
+                    StubScreen(
+                        title = "Review",
+                        body = "Scan a receipt to review its items.",
+                        onBack = { go(Scan) },
+                    )
+                } else {
+                    ReviewScreen(
+                        state = state,
+                        onBack = { go(Scan) },
+                        onName = scanViewModel::onName,
+                        onPrice = scanViewModel::onPrice,
+                        onQuantity = scanViewModel::onQuantity,
+                        onDelete = scanViewModel::delete,
+                        onAdd = scanViewModel::addItem,
+                        onTax = scanViewModel::onTax,
+                        onTip = scanViewModel::onTip,
+                        onAddPeople = { go(AddPeople) },
+                    )
+                }
+            }
+            AddPeople -> StubScreen(
+                title = "Add people",
+                body = "Next you'll add the people at the table, assign what they had, and see the totals.",
+                onBack = { go(Review) },
             )
             Profile -> StubScreen(
                 title = "Profile",
@@ -117,7 +160,10 @@ fun SplitTheBillApp() {
                         summaryBillId = id.value
                         go(Summary)
                     },
-                    onNewBill = { go(Scan) },
+                    onNewBill = {
+                        scanViewModel.reset()
+                        go(Scan)
+                    },
                 )
             }
         }
