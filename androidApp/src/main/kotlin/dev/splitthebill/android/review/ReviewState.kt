@@ -18,6 +18,7 @@ data class ReviewUiState(
     val tip: String,
     val receiptSubtotal: Cents?,
     val receiptTotal: Cents?,
+    val parsedTip: Cents? = null,
 )
 
 sealed interface SubtotalCheck {
@@ -45,6 +46,7 @@ fun reviewFromParsed(parsed: ParsedReceipt): ReviewUiState {
         tip = parsed.tip?.formatPlain().orEmpty(),
         receiptSubtotal = parsed.subtotal,
         receiptTotal = parsed.total,
+        parsedTip = parsed.tip,
     )
 }
 

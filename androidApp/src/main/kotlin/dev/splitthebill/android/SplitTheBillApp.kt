@@ -16,9 +16,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.splitthebill.android.data.ExampleBillRepository
+import dev.splitthebill.android.flow.AddPeopleScreen
+import dev.splitthebill.android.flow.AssignScreen
+import dev.splitthebill.android.flow.TipScreen
+import dev.splitthebill.android.flow.TotalsScreen
+import dev.splitthebill.android.flow.shareBill
 import dev.splitthebill.android.home.HomeScreen
 import dev.splitthebill.android.home.HomeViewModel
 import dev.splitthebill.android.review.ReceiptPhase
@@ -27,6 +32,12 @@ import dev.splitthebill.android.review.ReviewScreen
 import dev.splitthebill.android.scan.ScanRoute
 import dev.splitthebill.android.stub.StubScreen
 import dev.splitthebill.shared.BillId
+import dev.splitthebill.shared.SplitResult
+import dev.splitthebill.shared.assignmentMessage
+import dev.splitthebill.shared.shareSummary
+import dev.splitthebill.shared.sharesAddUp
+import dev.splitthebill.shared.split
+import dev.splitthebill.shared.toBill
 import kotlinx.coroutines.launch
 
 private const val Home = "home"
@@ -37,15 +48,19 @@ private const val Settings = "settings"
 private const val Summary = "summary"
 private const val Review = "review"
 private const val AddPeople = "add-people"
+private const val Assign = "assign"
+private const val Tip = "tip"
+private const val Totals = "totals"
 
 @Composable
 fun SplitTheBillApp() {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var route by rememberSaveable { mutableStateOf(Home) }
     var summaryBillId by rememberSaveable { mutableStateOf<String?>(null) }
-    val repository = ExampleBillRepository()
     val scanViewModel: ReceiptScanViewModel = viewModel()
+    val homeViewModel: HomeViewModel = viewModel()
 
     fun go(next: String) {
         route = next
@@ -57,6 +72,8 @@ fun SplitTheBillApp() {
             go(Review)
         }
     }
+
+    val billRoutes = setOf(Home, Scan, Review, AddPeople, Assign, Tip, Totals, Summary)
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -72,7 +89,7 @@ fun SplitTheBillApp() {
                 )
                 NavigationDrawerItem(
                     label = { Text("Bills") },
-                    selected = route == Home || route == Scan || route == Review || route == AddPeople || route == Summary,
+                    selected = route in billRoutes,
                     onClick = { go(Home) },
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
@@ -117,15 +134,112 @@ fun SplitTheBillApp() {
                         onAdd = scanViewModel::addItem,
                         onTax = scanViewModel::onTax,
                         onTip = scanViewModel::onTip,
-                        onAddPeople = { go(AddPeople) },
+                        onAddPeople = {
+                            if (scanViewModel.openPeople()) go(AddPeople)
+                        },
+                        notice = scanViewModel.reviewNotice,
                     )
                 }
             }
-            AddPeople -> StubScreen(
-                title = "Add people",
-                body = "Next you'll add the people at the table, assign what they had, and see the totals.",
-                onBack = { go(Review) },
-            )
+            AddPeople -> {
+                val draft = scanViewModel.draft
+                if (draft == null) {
+                    StubScreen(
+                        title = "Add people",
+                        body = "Review a receipt before adding people.",
+                        onBack = { go(Review) },
+                    )
+                } else {
+                    AddPeopleScreen(
+                        merchant = draft.merchant,
+                        people = draft.people,
+                        name = scanViewModel.personName,
+                        editingId = scanViewModel.editingPersonId,
+                        onName = scanViewModel::onPersonName,
+                        onSubmit = scanViewModel::submitPerson,
+                        onSelect = scanViewModel::selectPerson,
+                        onRemove = scanViewModel::removePersonFromBill,
+                        onBack = { go(Review) },
+                        onContinue = { go(Assign) },
+                    )
+                }
+            }
+            Assign -> {
+                val draft = scanViewModel.draft
+                if (draft == null) {
+                    StubScreen(
+                        title = "Assign",
+                        body = "Add people before assigning items.",
+                        onBack = { go(AddPeople) },
+                    )
+                } else {
+                    AssignScreen(
+                        merchant = draft.merchant,
+                        people = draft.people,
+                        items = draft.items,
+                        message = assignmentMessage(draft),
+                        onToggle = scanViewModel::togglePerson,
+                        onEveryone = scanViewModel::assignItemToEveryone,
+                        onSplitRemaining = scanViewModel::splitRemaining,
+                        onBack = { go(AddPeople) },
+                        onContinue = {
+                            scanViewModel.prepareTipFields()
+                            go(Tip)
+                        },
+                    )
+                }
+            }
+            Tip -> {
+                val draft = scanViewModel.draft
+                if (draft == null) {
+                    StubScreen(
+                        title = "Tip",
+                        body = "Assign every item before choosing a tip.",
+                        onBack = { go(Assign) },
+                    )
+                } else {
+                    TipScreen(
+                        subtotal = draft.itemsSubtotal,
+                        parsedTip = draft.parsedTip,
+                        choice = draft.tipChoice,
+                        customPercent = scanViewModel.customPercent,
+                        fixedAmount = scanViewModel.fixedTip,
+                        onPercent = scanViewModel::choosePercent,
+                        onCustomPercent = scanViewModel::onCustomPercent,
+                        onFixedAmount = scanViewModel::onFixedTip,
+                        onNoTip = scanViewModel::chooseNoTip,
+                        onBack = { go(Assign) },
+                        onContinue = {
+                            scanViewModel.saveBill()
+                            go(Totals)
+                        },
+                    )
+                }
+            }
+            Totals -> {
+                val draft = scanViewModel.draft
+                val result = draft?.let { split(it.toBill()) }
+                if (draft == null || result !is SplitResult.Success) {
+                    StubScreen(
+                        title = "Totals",
+                        body = "Finish assigning items and a tip to see the totals.",
+                        onBack = { go(Tip) },
+                    )
+                } else {
+                    val bill = draft.toBill()
+                    TotalsScreen(
+                        bill = bill,
+                        shares = result.shares,
+                        addsUp = sharesAddUp(bill, result.shares),
+                        onBack = { go(Tip) },
+                        onShare = { shareBill(context, shareSummary(bill, result.shares)) },
+                        onDone = {
+                            scanViewModel.reset()
+                            go(Home)
+                        },
+                    )
+                }
+            }
             Profile -> StubScreen(
                 title = "Profile",
                 body = "Your profile and settings will live here.",
@@ -142,18 +256,28 @@ fun SplitTheBillApp() {
                 onBack = { go(Home) },
             )
             Summary -> {
-                val recorded = repository.bills().find { it.bill.id.value == summaryBillId }
-                val merchant = recorded?.bill?.merchant ?: "This bill"
-                StubScreen(
-                    title = "Summary",
-                    body = "$merchant. Totals for this bill will show up here.",
-                    onBack = { go(Home) },
-                )
+                val recorded = summaryBillId?.let { homeViewModel.recorded(it) }
+                val result = recorded?.let { split(it.bill) }
+                if (recorded == null || result !is SplitResult.Success) {
+                    StubScreen(
+                        title = recorded?.bill?.merchant ?: "This bill",
+                        body = if (result is SplitResult.Failure) result.error.message else "That bill is no longer saved.",
+                        onBack = { go(Home) },
+                    )
+                } else {
+                    TotalsScreen(
+                        bill = recorded.bill,
+                        shares = result.shares,
+                        addsUp = sharesAddUp(recorded.bill, result.shares),
+                        onBack = { go(Home) },
+                        onShare = { shareBill(context, shareSummary(recorded.bill, result.shares)) },
+                        onDone = null,
+                    )
+                }
             }
             else -> {
-                val viewModel: HomeViewModel = viewModel()
                 HomeScreen(
-                    state = viewModel.uiState,
+                    state = homeViewModel.uiState,
                     onMenu = { scope.launch { drawerState.open() } },
                     onProfile = { go(Profile) },
                     onBill = { id: BillId ->

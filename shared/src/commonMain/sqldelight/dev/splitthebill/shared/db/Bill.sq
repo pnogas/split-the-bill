@@ -1,0 +1,81 @@
+CREATE TABLE bill (
+  id TEXT NOT NULL PRIMARY KEY,
+  createdAtMillis INTEGER NOT NULL,
+  merchant TEXT,
+  taxCents INTEGER NOT NULL,
+  tipCents INTEGER NOT NULL,
+  paidBy TEXT NOT NULL,
+  settled INTEGER NOT NULL
+);
+
+CREATE TABLE person (
+  billId TEXT NOT NULL,
+  personId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (billId, personId)
+);
+
+CREATE TABLE lineItem (
+  billId TEXT NOT NULL,
+  itemId TEXT NOT NULL,
+  name TEXT NOT NULL,
+  priceCents INTEGER NOT NULL,
+  quantity INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (billId, itemId)
+);
+
+CREATE TABLE itemShare (
+  billId TEXT NOT NULL,
+  itemId TEXT NOT NULL,
+  personId TEXT NOT NULL,
+  PRIMARY KEY (billId, itemId, personId)
+);
+
+selectAll:
+SELECT id, createdAtMillis, merchant, taxCents, tipCents, paidBy, settled
+FROM bill
+ORDER BY createdAtMillis DESC;
+
+selectPeople:
+SELECT billId, personId, name, position
+FROM person
+ORDER BY position;
+
+selectItems:
+SELECT billId, itemId, name, priceCents, quantity, position
+FROM lineItem
+ORDER BY position;
+
+selectShares:
+SELECT billId, itemId, personId
+FROM itemShare;
+
+deletePeople:
+DELETE FROM person
+WHERE billId = ?;
+
+deleteItems:
+DELETE FROM lineItem
+WHERE billId = ?;
+
+deleteShares:
+DELETE FROM itemShare
+WHERE billId = ?;
+
+insertBill:
+INSERT OR REPLACE INTO bill(id, createdAtMillis, merchant, taxCents, tipCents, paidBy, settled)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+insertPerson:
+INSERT INTO person(billId, personId, name, position)
+VALUES (?, ?, ?, ?);
+
+insertItem:
+INSERT INTO lineItem(billId, itemId, name, priceCents, quantity, position)
+VALUES (?, ?, ?, ?, ?, ?);
+
+insertShare:
+INSERT INTO itemShare(billId, itemId, personId)
+VALUES (?, ?, ?);

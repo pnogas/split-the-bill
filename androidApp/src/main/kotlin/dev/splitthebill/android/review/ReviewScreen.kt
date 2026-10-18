@@ -52,6 +52,7 @@ fun ReviewScreen(
     onTip: (String) -> Unit,
     onAddPeople: () -> Unit,
     modifier: Modifier = Modifier,
+    notice: String? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     Scaffold(
@@ -102,6 +103,13 @@ fun ReviewScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 color = scheme.onSurfaceVariant,
             )
+            if (notice != null) {
+                Text(
+                    text = notice,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = scheme.error,
+                )
+            }
             if (state.items.isEmpty()) {
                 Text(
                     text = "No items were found. Add what was on the receipt.",
